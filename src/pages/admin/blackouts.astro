@@ -1,0 +1,112 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { Calendar, ChevronLeft, AlertTriangle, Plus, Trash2 } from 'lucide-astro';
+import { supabase } from '../../lib/supabase';
+import { format } from 'date-fns';
+
+const { data: courts } = await supabase.from('courts').select('*');
+const { data: blackouts } = await supabase.from('blackouts').select('*, courts(name)').order('date', { ascending: true });
+---
+
+<Layout title="Blackout Manager | Pickle Scheduler">
+  <div class="flex flex-col gap-8">
+    <header class="flex justify-between items-end border-b border-white/10 pb-6">
+      <div>
+        <a href="/admin" class="flex items-center gap-2 text-white/40 hover:text-white transition-colors mb-4 text-sm font-bold">
+          <ChevronLeft size={16} />
+          Back to Dashboard
+        </a>
+        <h1 class="text-4xl font-bold tracking-tight text-white">Blackout Manager</h1>
+        <p class="text-white/60 mt-2">Prevent bookings during maintenance or private events.</p>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <!-- Create Blackout -->
+      <div class="bento-card">
+        <h2 class="text-xl font-bold mb-6 flex items-center gap-2">
+          <Plus size={20} class="text-brand-primary" />
+          Create Blackout
+        </h2>
+        <form id="blackout-form" class="space-y-4">
+          <div class="space-y-2">
+            <label class="text-xs font-bold uppercase tracking-widest text-white/40">Select Court</label>
+            <select name="court_id" required class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white">
+              {courts?.map(court => (
+                <option value={court.id}>{court.name}</option>
+              ))}
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-bold uppercase tracking-widest text-white/40">Date</label>
+            <input type="date" name="date" required class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-bold uppercase tracking-widest text-white/40">Reason</label>
+            <input type="text" name="reason" placeholder="Maintenance" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white" />
+          </div>
+          <button type="submit" class="w-full py-3 bg-brand-primary text-black rounded-xl font-bold hover:bg-brand-primary/90 transition-all mt-4">
+            Add Blackout
+          </button>
+        </form>
+      </div>
+
+      <!-- Active Blackouts -->
+      <div class="md:col-span-2 bento-card">
+        <h2 class="text-xl font-bold mb-6 flex items-center gap-2">
+          <Calendar size={20} class="text-brand-primary" />
+          Scheduled Blackouts
+        </h2>
+        
+        <div class="space-y-4">
+          {blackouts && blackouts.length > 0 ? blackouts.map(blackout => (
+            <div class="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+              <div class="flex items-center gap-4">
+                <div class="p-2 bg-red-500/10 rounded-lg text-red-500">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <p class="font-bold">{blackout.courts.name}</p>
+                  <p class="text-sm text-white/40">{format(new Date(blackout.date), 'MMMM d, yyyy')} — {blackout.reason}</p>
+                </div>
+              </div>
+              <button class="delete-blackout-btn p-2 hover:bg-red-500/10 rounded-lg text-white/40 hover:text-red-500 transition-colors" data-id={blackout.id}>
+                <Trash2 size={18} />
+              </button>
+            </div>
+          )) : (
+            <p class="text-white/20 text-center py-12">No blackouts scheduled.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  import { supabase } from '../../lib/supabase';
+
+  const form = document.getElementById('blackout-form') as HTMLFormElement;
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    const { error } = await supabase.from('blackouts').insert([data]);
+
+    if (!error) {
+      window.location.reload();
+    } else {
+      alert('Error: ' + error.message);
+    }
+  });
+
+  document.querySelectorAll('.delete-blackout-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      const { error } = await supabase.from('blackouts').delete().eq('id', id);
+      if (!error) window.location.reload();
+    });
+  });
+</script>

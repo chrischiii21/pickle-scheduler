@@ -1,0 +1,205 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { CheckCircle2, Calendar, Clock, MapPin, ArrowRight, User, Phone, Mail, Camera, QrCode, Info } from 'lucide-astro';
+import { supabase } from '../../lib/supabase';
+import { format } from 'date-fns';
+
+const transactionId = Astro.url.searchParams.get('transactionId');
+
+const { data: bookings } = await supabase
+  .from('bookings')
+  .select('*, courts(*)')
+  .eq('transaction_id', transactionId);
+
+if (!bookings || bookings.length === 0) {
+  return Astro.redirect('/');
+}
+
+const booking = bookings[0];
+const ticketNo = booking.transaction_id.split('-')[0].toUpperCase();
+---
+
+<Layout title="Booking Confirmed | Pickle Scheduler">
+  <div class="max-w-xl mx-auto py-12 px-4">
+    <div class="text-center mb-10">
+      <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-brand-primary/10 text-brand-primary text-[10px] font-bold uppercase tracking-wider mb-4 border border-brand-primary/20">
+        <Clock size={14} /> Reservation Slot Secured
+      </div>
+      <h1 class="text-4xl font-bold mb-2 tracking-tight">Booking Confirmed!</h1>
+      <p class="text-white/40 text-sm">Your slots have been reserved for play.</p>
+    </div>
+
+    <!-- The Digital Ticket -->
+    <div id="digital-ticket" class="relative group">
+      <!-- Punch holes aesthetic -->
+      <div class="absolute -left-3 top-[15%] w-6 h-6 bg-brand-dark rounded-full z-10 hidden sm:block border-r border-white/5"></div>
+      <div class="absolute -right-3 top-[15%] w-6 h-6 bg-brand-dark rounded-full z-10 hidden sm:block border-l border-white/5"></div>
+      
+      <div class="bg-brand-muted border border-white/10 rounded-[40px] overflow-hidden shadow-2xl transition-all group-hover:border-brand-primary/20">
+        <!-- Ticket Header -->
+        <div class="bg-brand-primary p-8 text-black flex justify-between items-center relative overflow-hidden">
+          <div class="absolute -right-4 -top-4 opacity-10 rotate-12">
+            <QrCode size={120} />
+          </div>
+          <div class="relative z-10">
+            <p class="text-[10px] font-black uppercase tracking-tighter opacity-50">Pickle Scheduler</p>
+            <h2 class="text-2xl font-black uppercase italic tracking-tighter">Digital Pass</h2>
+          </div>
+          <div class="text-right relative z-10">
+            <p class="text-[10px] font-black uppercase opacity-50">Ref ID</p>
+            <p class="text-xl font-black tracking-tighter">#{ticketNo}</p>
+          </div>
+        </div>
+
+        <div class="p-8 space-y-8">
+          <!-- Court & Info -->
+          <div class="flex justify-between items-start">
+            <div>
+              <p class="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-1">Facility & Court</p>
+              <h3 class="text-3xl font-bold text-white tracking-tight">{booking.courts.name}</h3>
+            </div>
+            <div class="text-right">
+               <p class="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-1">Status</p>
+               <span class="px-3 py-1 bg-brand-primary/10 text-brand-primary rounded-lg text-[10px] font-bold border border-brand-primary/20">RESERVED</span>
+            </div>
+          </div>
+
+          <!-- Time & Date Grid -->
+          <div class="space-y-6 bg-white/[0.02] rounded-3xl p-6 border border-white/5">
+            <div class="flex items-center gap-4">
+              <div class="w-10 h-10 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary">
+                <Calendar size={20} />
+              </div>
+              <div>
+                <p class="text-[10px] font-bold uppercase tracking-widest text-white/20">Date</p>
+                <p class="text-lg font-bold text-white">{format(new Date(booking.start_time), 'EEEE, MMMM d, yyyy')}</p>
+              </div>
+            </div>
+
+            <div class="pt-6 border-t border-white/5">
+              <div class="flex items-center gap-4 mb-4">
+                <div class="w-10 h-10 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary">
+                  <Clock size={20} />
+                </div>
+                <div>
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-white/20">Selected Time Slots</p>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 gap-2">
+                {bookings.map(b => (
+                  <div class="flex justify-between items-center bg-white/5 px-4 py-3 rounded-xl border border-white/5">
+                    <span class="text-sm font-bold text-white">{b.manual_slot_id || format(new Date(b.start_time), 'h:mm a')}</span>
+                    <span class="text-[10px] font-bold text-brand-primary/60 uppercase">Confirmed</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <!-- Renter Details -->
+          <div class="grid grid-cols-2 gap-8">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40">
+                <User size={14} />
+              </div>
+              <div>
+                <p class="text-[9px] font-bold uppercase tracking-widest text-white/20">Player</p>
+                <p class="text-sm font-bold">{booking.renter_name}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40">
+                <Phone size={14} />
+              </div>
+              <div>
+                <p class="text-[9px] font-bold uppercase tracking-widest text-white/20">Contact</p>
+                <p class="text-sm font-bold">{booking.renter_phone || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Payment Notice -->
+          <div class="bg-yellow-500/5 border border-yellow-500/20 rounded-2xl p-4 flex items-start gap-3">
+             <div class="text-yellow-500 mt-0.5">
+                <Info size={16} />
+             </div>
+             <div>
+                <p class="text-[10px] font-bold text-yellow-500 uppercase tracking-widest mb-1">Payment Notice</p>
+                <p class="text-[11px] text-white/60 leading-relaxed">This is a <strong>reservation only</strong>. Please settle the total amount at the court counter upon arrival.</p>
+             </div>
+          </div>
+
+          <!-- Bottom Section -->
+          <div class="pt-8 border-t border-dashed border-white/10 flex items-center justify-between">
+             <div class="p-4 bg-white text-black rounded-3xl">
+                <QrCode size={60} />
+             </div>
+             <div class="text-right">
+                <p class="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-1">Verify at Venue</p>
+                <p class="text-xs font-bold text-brand-primary">Official Digital Pass</p>
+             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Instruction -->
+    <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <button id="download-btn" class="bg-brand-primary text-black py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-brand-primary/90 transition-all shadow-lg shadow-brand-primary/20">
+        <Camera size={20} />
+        Download Ticket (PNG)
+      </button>
+      
+      <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center flex items-center justify-center gap-3">
+        <div class="text-brand-primary">
+          <Camera size={20} />
+        </div>
+        <div class="text-left">
+          <h4 class="text-xs font-bold text-white">Or Screenshot</h4>
+          <p class="text-[10px] text-white/40">Show this to the manager.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-8 flex justify-center">
+      <a href="/" class="text-white/20 hover:text-white transition-colors text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+        <ArrowRight size={14} class="rotate-180" />
+        Return to Home
+      </a>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  import html2canvas from 'html2canvas';
+
+  const downloadBtn = document.getElementById('download-btn');
+  const ticket = document.getElementById('digital-ticket');
+
+  downloadBtn?.addEventListener('click', async () => {
+    if (!ticket) return;
+    
+    downloadBtn.innerHTML = '<span class="animate-spin">◌</span> Generating...';
+    downloadBtn.setAttribute('disabled', 'true');
+    
+    try {
+      const canvas = await html2canvas(ticket, {
+        backgroundColor: '#0a0a0a', // Matches brand-dark
+        scale: 2, // Higher quality
+        logging: false,
+        useCORS: true
+      });
+      
+      const link = document.createElement('a');
+      link.download = `pickle-ticket-${Date.now()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert('Could not generate image. Please take a screenshot instead.');
+    } finally {
+      downloadBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-camera"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg> Download Ticket (PNG)';
+      downloadBtn.removeAttribute('disabled');
+    }
+  });
+</script>

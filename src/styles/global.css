@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-primary: #00ff88;
-  --color-brand-secondary: #00ccff;
+  --color-brand-primary: #10b981;
+  --color-brand-secondary: #34d399;
   --color-brand-dark: #0a0a0a;
-  --color-brand-muted: #1a1a1a;
+  --color-brand-muted: #141414;
   
   --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
 }
@@ -27,15 +27,32 @@ body {
 }
 
 .bento-card {
-  background: var(--color-brand-muted);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 1rem;
-  padding: 1.5rem;
-  transition: all 0.3s ease;
+  background: linear-gradient(145deg, #141414, #0d0d0d);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 1.5rem;
+  padding: 2rem;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .bento-card:hover {
-  border-color: var(--color-brand-primary);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px -10px rgba(0, 255, 136, 0.2);
+  border-color: color-mix(in srgb, var(--color-brand-primary), transparent 70%);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.8), 0 0 20px color-mix(in srgb, var(--color-brand-primary), transparent 90%);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-brand-primary), transparent 50%);
 }

@@ -1,0 +1,1248 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { Plus, LayoutDashboard, Settings, Calendar, Link as LinkIcon, AlertTriangle, Trash2, LogOut, Clock, Check, X, Ticket, Eye, ExternalLink, Activity } from 'lucide-astro';
+import { createSupabaseServer } from '../lib/supabase';
+import { format, startOfWeek, addDays, startOfMonth, endOfMonth, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isBefore, startOfDay } from 'date-fns';
+
+// 1. Check for Session (SSR)
+const supabase = createSupabaseServer(Astro);
+const { data: { session } } = await supabase.auth.getSession();
+
+if (!session) {
+  return Astro.redirect('/login');
+}
+
+// 2. Fetch real courts belonging to this manager
+const { data: courts } = await supabase
+  .from('courts')
+  .select('*')
+  .eq('manager_id', session.user.id)
+  .order('created_at', { ascending: false });
+
+// 3. Fetch blackouts for these courts
+const courtIds = courts?.map(c => c.id) || [];
+const { data: blackoutsData } = await supabase
+  .from('blackouts')
+  .select('*, courts(name)')
+  .in('court_id', courtIds)
+  .order('date', { ascending: true });
+
+// 3. Fetch all bookings for this manager's courts (for stats)
+const { data: allBookings } = await supabase
+  .from('bookings')
+  .select('*, courts(name, manager_id)')
+  .eq('courts.manager_id', session.user.id)
+  .order('start_time', { ascending: false });
+
+const upcomingBookings = allBookings?.filter(b => new Date(b.start_time) >= new Date()) || [];
+const todayBookings = allBookings?.filter(b => isSameDay(new Date(b.start_time), new Date())) || [];
+const bookings = allBookings; // Keep original name for calendar compatibility
+
+// 4. Calculate Month Grid
+const now = new Date();
+const monthStart = startOfMonth(now);
+const monthEnd = endOfMonth(monthStart);
+const calendarStart = startOfWeek(monthStart);
+const calendarEnd = endOfWeek(monthEnd);
+const calendarDays = eachDayOfInterval({
+  start: calendarStart,
+  end: calendarEnd,
+});
+
+const COURT_COLORS = [
+  { bg: 'bg-brand-primary/20', border: 'border-brand-primary/50', text: 'text-brand-primary', dot: 'bg-brand-primary' },
+  { bg: 'bg-blue-500/20', border: 'border-blue-500/50', text: 'text-blue-400', dot: 'bg-blue-500' },
+  { bg: 'bg-purple-500/20', border: 'border-purple-500/50', text: 'text-purple-400', dot: 'bg-purple-500' },
+  { bg: 'bg-amber-500/20', border: 'border-amber-500/50', text: 'text-amber-400', dot: 'bg-amber-500' },
+  { bg: 'bg-rose-500/20', border: 'border-rose-500/50', text: 'text-rose-400', dot: 'bg-rose-500' },
+];
+
+function getCourtColor(courtId: string) {
+  const index = courtIds.indexOf(courtId);
+  return COURT_COLORS[index % COURT_COLORS.length];
+}
+
+const { data: settings } = await supabase
+  .from('facility_settings')
+  .select('*')
+  .eq('manager_id', session.user.id)
+  .single();
+
+const isSetupCompleted = settings?.is_setup_completed ?? false;
+const primaryColor = settings?.primary_color ?? '#00FF94';
+const secondaryColor = primaryColor + 'cc'; // Add some transparency for secondary
+const businessName = settings?.business_name ?? 'Manager Dashboard';
+const logoUrl = settings?.logo_url ?? '';
+---
+
+<Layout title={`${businessName} | Pickle Scheduler`}>
+  <div class="flex flex-col gap-8">
+    <header class="flex flex-col sm:flex-row justify-between items-center sm:items-end border-b border-white/10 pb-8 gap-6">
+      <div class="flex items-center gap-6">
+        <div class="w-20 h-20 rounded-3xl bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-center overflow-hidden shadow-lg shadow-brand-primary/5">
+           {logoUrl ? <img src={logoUrl} class="w-full h-full object-cover" /> : <Activity class="text-brand-primary" size={40} />}
+        </div>
+        <div>
+          <h1 class="text-4xl font-black tracking-tight text-white">{businessName}</h1>
+          <p class="text-white/40 font-medium">Manage your facility and schedules with visual precision.</p>
+        </div>
+      </div>
+      <div class="flex gap-4">
+        <button id="logout-btn" class="px-4 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition-all text-white/60 hover:text-white flex items-center gap-2">
+          <LogOut size={20} />
+          Sign Out
+        </button>
+        <button id="open-add-modal" class="bg-brand-primary text-black px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-brand-primary/90 transition-all">
+          <Plus size={20} />
+          Add New Court
+        </button>
+      </div>
+    </header>
+
+    <!-- Stats Row -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="bento-card relative overflow-hidden group">
+        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+          <Calendar size={64} />
+        </div>
+        <p class="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Upcoming</p>
+        <h3 class="text-3xl font-bold text-brand-primary">{upcomingBookings.length}</h3>
+        <p class="text-[10px] text-white/20 mt-1">Confirmed reservations</p>
+      </div>
+
+      <div class="bento-card relative overflow-hidden group">
+        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+          <Clock size={64} />
+        </div>
+        <p class="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Today</p>
+        <h3 class="text-3xl font-bold text-brand-primary">{todayBookings.length}</h3>
+        <p class="text-[10px] text-white/20 mt-1">Scheduled for today</p>
+      </div>
+
+      <div class="bento-card relative overflow-hidden group">
+        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+          <LayoutDashboard size={64} />
+        </div>
+        <p class="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">Active Courts</p>
+        <h3 class="text-3xl font-bold text-brand-primary">{courts?.length || 0}</h3>
+        <p class="text-[10px] text-white/20 mt-1">Managed facilities</p>
+      </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div class="lg:col-span-8 space-y-6">
+        <div class="bento-card overflow-hidden">
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
+            <div class="flex items-center gap-3">
+              <div class="p-2 bg-brand-primary/10 rounded-lg text-brand-primary">
+                <Calendar size={24} />
+              </div>
+              <div>
+                <h2 class="text-xl font-bold">Booking Schedule</h2>
+                <p class="text-xs text-white/40">{format(now, 'MMMM yyyy')}</p>
+              </div>
+            </div>
+            
+            <div class="flex bg-white/5 p-1 rounded-xl border border-white/10">
+              <button id="view-calendar" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all bg-brand-primary text-black">Schedule</button>
+              <button id="view-reservations" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all text-white/40 hover:text-white">Reservations</button>
+            </div>
+          </div>
+
+          <!-- Calendar View -->
+          <div id="calendar-container" class="transition-all duration-300">
+              <div class="flex justify-end gap-2 mb-6">
+                 <div class="flex bg-white/5 p-1 rounded-lg border border-white/5">
+                    <button id="view-month" class="px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all bg-white/10 text-white">Month</button>
+                    <button id="view-week" class="px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all text-white/40 hover:text-white">Week</button>
+                 </div>
+              </div>
+              
+              <!-- Month View -->
+              <div id="month-view-container" class="transition-all duration-300">
+                <div class="grid grid-cols-7 gap-px bg-white/5 border border-white/5 rounded-2xl overflow-hidden">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <div class="bg-brand-muted p-4 text-center text-[10px] font-bold uppercase text-white/20 tracking-widest">
+                      {day}
+                    </div>
+                  ))}
+                  {calendarDays.map(day => {
+                    const dayBookings = bookings?.filter(b => isSameDay(new Date(b.start_time), day));
+                    const isCurrentMonth = isSameMonth(day, monthStart);
+                    const isToday = isSameDay(day, new Date());
+                    
+                    return (
+                      <div class={`min-h-[120px] bg-brand-dark p-2 border-t border-white/5 ${!isCurrentMonth ? 'opacity-20' : ''}`}>
+                        <div class="flex justify-between items-start mb-2">
+                          <span class={`text-sm font-bold ${isToday ? 'bg-brand-primary text-black w-6 h-6 rounded-full flex items-center justify-center' : 'text-white/60'}`}>
+                            {format(day, 'd')}
+                          </span>
+                          <div class="flex gap-1 items-center">
+                            {dayBookings && dayBookings.length > 0 && (
+                              <span class="text-[9px] bg-brand-primary/10 text-brand-primary px-1.5 py-0.5 rounded-full font-bold">
+                                {dayBookings.length}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                          {dayBookings?.slice(0, 3).map(b => {
+                            const colors = getCourtColor(b.court_id);
+                            return (
+                              <div class={`text-[8px] bg-white/5 border border-white/5 rounded px-1 py-0.5 truncate flex items-center gap-1 text-white/40 group/booking relative`}>
+                                <div class={`w-1 h-1 rounded-full ${colors.dot}`}></div>
+                                {format(new Date(b.start_time), 'h:mm a')} • {b.renter_name}
+                              </div>
+                            );
+                          })}
+                          {blackoutsData?.filter(b => isSameDay(new Date(b.date), day)).map(b => (
+                            <div class="text-[8px] bg-red-500/10 border border-red-500/20 rounded px-1 py-0.5 truncate text-red-400 flex items-center gap-1">
+                               <div class="w-1 h-1 rounded-full bg-red-500"></div>
+                               Blocked: {b.courts.name}
+                            </div>
+                          ))}
+                          {dayBookings && dayBookings.length > 3 && (
+                            <div class="text-[8px] text-brand-primary/60 pl-1 font-bold">
+                              +{dayBookings.length - 3} more
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <!-- Weekly View (Hidden by default) -->
+              <div id="week-view-container" class="hidden transition-all duration-300 overflow-x-auto custom-scrollbar">
+                 <div class="min-w-[800px]">
+                    <div class="grid grid-cols-8 border border-white/5 rounded-2xl overflow-hidden">
+                       <div class="bg-white/5 border-r border-white/5">
+                          <div class="h-10 border-b border-white/5"></div>
+                          {Array.from({ length: 15 }).map((_, i) => (
+                             <div class="h-16 border-b border-white/5 flex items-center justify-center text-[10px] font-bold text-white/20 uppercase">{i + 7}:00</div>
+                          ))}
+                       </div>
+                       {Array.from({ length: 7 }).map((_, i) => {
+                          const day = addDays(startOfWeek(now), i);
+                          return (
+                             <div class="bg-brand-dark border-r border-white/5 last:border-r-0">
+                                <div class={`h-10 border-b border-white/5 flex items-center justify-center text-[10px] font-bold uppercase tracking-widest ${isSameDay(day, new Date()) ? 'text-brand-primary' : 'text-white/40'}`}>
+                                   {format(day, 'EEE d')}
+                                </div>
+                                {Array.from({ length: 15 }).map((_, h) => {
+                                   const hour = h + 7;
+                                   const currentSlot = bookings?.find(b => {
+                                      const bDate = new Date(b.start_time);
+                                      return bDate.getDate() === day.getDate() && bDate.getHours() === hour;
+                                   });
+                                   
+                                   return (
+                                      <div class="h-16 border-b border-white/5 p-1 relative">
+                                         {currentSlot ? (() => {
+                                            const colors = getCourtColor(currentSlot.court_id);
+                                            return (
+                                              <div class={`absolute inset-1 ${colors.bg} border ${colors.border} rounded-lg p-2 overflow-hidden group/item cursor-help transition-all hover:scale-[1.02] z-10 shadow-lg`} title={`${currentSlot.renter_name} (${currentSlot.courts.name})`}>
+                                                 <p class={`text-[9px] font-bold ${colors.text} truncate`}>{currentSlot.renter_name}</p>
+                                                 <p class={`text-[8px] ${colors.text} opacity-60 truncate`}>{currentSlot.courts.name}</p>
+                                              </div>
+                                            );
+                                         })() : (() => {
+                                            const blackout = blackoutsData?.find(b => isSameDay(new Date(b.date), day));
+                                            if (blackout) {
+                                               return (
+                                                  <div class="absolute inset-0 bg-red-500/5 flex items-center justify-center pointer-events-none">
+                                                     <div class="text-[6px] text-red-500/20 font-black uppercase tracking-tighter rotate-12">Blocked: {blackout.courts.name}</div>
+                                                  </div>
+                                               );
+                                            }
+                                            return null;
+                                         })()}
+                                      </div>
+                                   )
+                                })}
+                             </div>
+                          )
+                       })}
+                    </div>
+                 </div>
+              </div>
+          </div>
+
+          <!-- Reservations List View -->
+          <div id="reservations-container" class="hidden transition-all duration-300">
+            <div class="bento-card bg-white/5 border-white/10 p-0 overflow-hidden">
+              {allBookings && allBookings.length > 0 ? (
+                <div class="overflow-x-auto">
+                  <table class="w-full text-left">
+                    <thead>
+                      <tr class="bg-white/[0.02] border-b border-white/5 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                        <th class="px-6 py-4">Ticket #</th>
+                        <th class="px-6 py-4">Court</th>
+                        <th class="px-6 py-4">Player Details</th>
+                        <th class="px-6 py-4 text-center">Date & Time</th>
+                        <th class="px-6 py-4 text-center">Type</th>
+                        <th class="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-white/5">
+                      {allBookings.map(booking => (
+                        <tr class="group hover:bg-white/[0.02] transition-all duration-300">
+                          <td class="px-6 py-5 align-middle">
+                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-brand-primary/5 border border-brand-primary/20 text-brand-primary font-mono text-[10px] font-bold tracking-wider shadow-sm shadow-brand-primary/5">
+                              #{booking.transaction_id?.slice(-8).toUpperCase() || 'N/A'}
+                            </span>
+                          </td>
+                          <td class="px-6 py-5 align-middle">
+                            <p class="font-bold text-sm text-white group-hover:text-brand-primary transition-colors">{booking.courts.name}</p>
+                            <p class="text-[9px] text-white/20 uppercase font-bold tracking-widest mt-0.5">Court Facility</p>
+                          </td>
+                          <td class="px-6 py-5 align-middle">
+                            <div class="flex items-center gap-3">
+                              <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 flex items-center justify-center text-brand-primary font-bold text-sm border border-white/5">
+                                {booking.renter_name.charAt(0).toUpperCase()}
+                              </div>
+                              <div class="min-w-0">
+                                <p class="font-bold text-sm text-white truncate">{booking.renter_name}</p>
+                                <div class="flex flex-col gap-0.5">
+                                  <p class="text-[10px] text-white/40 truncate">{booking.renter_email}</p>
+                                  {booking.renter_phone && <p class="text-[9px] text-brand-primary/50 font-medium">{booking.renter_phone}</p>}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td class="px-6 py-5 align-middle whitespace-nowrap">
+                            <div class="flex flex-col">
+                              <span class="font-bold text-sm text-white">{format(new Date(booking.start_time), 'EEEE, MMM d')}</span>
+                              <span class="text-[11px] text-brand-primary font-bold tracking-tight">
+                                {booking.manual_slot_id || `${format(new Date(booking.start_time), 'h:mm a')} - ${format(new Date(new Date(booking.start_time).getTime() + 3600000), 'h:mm a')}`}
+                              </span>
+                            </div>
+                          </td>
+                          <td class="px-6 py-5 align-middle text-center">
+                            {booking.is_open_play ? (
+                              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-primary/10 text-brand-primary text-[9px] font-black border border-brand-primary/20 uppercase tracking-tighter">
+                                <span class="w-1 h-1 rounded-full bg-brand-primary animate-pulse"></span>
+                                Open Play
+                              </span>
+                            ) : (
+                              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 text-white/40 text-[9px] font-black border border-white/10 uppercase tracking-tighter">
+                                Exclusive
+                              </span>
+                            )}
+                          </td>
+                          <td class="px-6 py-5 align-middle text-right">
+                            <button class="p-2.5 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white transition-all duration-300 delete-booking-btn hover:shadow-lg hover:shadow-red-500/20" data-id={booking.id} title="Cancel Reservation">
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div class="flex flex-col items-center justify-center py-24 text-center px-6">
+                  <div class="w-20 h-20 rounded-[2.5rem] bg-white/5 flex items-center justify-center text-white/10 mb-6 border border-white/5 shadow-2xl">
+                    <Ticket size={40} />
+                  </div>
+                  <h4 class="text-xl font-bold text-white mb-2">No Reservations Found</h4>
+                  <p class="text-white/40 text-sm max-w-[280px] mx-auto">When customers book your courts, they will appear here in a detailed list ready for review.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div class="lg:col-span-4 space-y-6">
+        <div class="bento-card bg-white/5 border-white/10 p-6 relative overflow-hidden group">
+          <div class="flex items-center gap-3 mb-6 border-b border-white/5 pb-4">
+            <div class="w-10 h-10 rounded-xl bg-brand-primary/10 flex items-center justify-center text-brand-primary group-hover:scale-110 transition-transform">
+              <Settings size={20} />
+            </div>
+            <div>
+              <h2 class="text-lg font-bold">My Courts</h2>
+              <p class="text-white/20 text-[10px] uppercase font-bold tracking-widest">Facility Setup</p>
+            </div>
+          </div>
+          <div class="space-y-3">
+            {courts && courts.length > 0 ? (
+              courts.map((court) => (
+                <div 
+                  class="p-4 bg-white/[0.02] border border-white/5 rounded-2xl hover:border-brand-primary/30 hover:bg-white/[0.04] transition-all flex items-center justify-between group/item cursor-pointer view-court-btn"
+                  data-id={court.id} 
+                  data-name={court.name} 
+                  data-price={court.base_price}
+                  data-open-price={court.base_open_price}
+                  data-open-play={String(court.allow_open_play ?? false)}
+                  data-max-players={court.max_players || 4}
+                  data-rules={JSON.stringify(court.pricing_rules || [])}
+                  data-slots={JSON.stringify(court.manual_slots || [])}
+                >
+                  <div class="min-w-0 flex-1">
+                    <h3 class="text-sm font-bold text-white group-hover/item:text-brand-primary transition-colors truncate">{court.name}</h3>
+                    <div class="flex items-center gap-2 mt-1">
+                      <p class="text-[10px] text-white/40">₱{court.base_price} / hour</p>
+                      {court.allow_open_play && (
+                        <span class="text-[8px] bg-brand-primary/10 text-brand-primary px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter">Open Play</span>
+                      )}
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1 opacity-40 group-hover/item:opacity-100 transition-opacity" onclick="event.stopPropagation()">
+                    <button class="p-2 rounded-lg hover:bg-white/5 text-white/60 copy-link-btn" data-id={court.id} title="Copy Link">
+                      <LinkIcon size={14} />
+                    </button>
+                    <button class="p-2 rounded-lg hover:bg-white/5 text-white/60 edit-court-btn" 
+                      data-id={court.id} 
+                      data-name={court.name} 
+                      data-price={court.base_price}
+                      data-open-price={court.base_open_price}
+                      data-open-play={String(court.allow_open_play ?? false)}
+                      data-max-players={court.max_players || 4}
+                      data-rules={JSON.stringify(court.pricing_rules || [])}
+                      data-slots={JSON.stringify(court.manual_slots || [])}
+                      title="Edit">
+                      <Settings size={14} />
+                    </button>
+                    <button class="p-2 rounded-lg hover:bg-red-500/10 text-red-400 delete-court-btn" data-id={court.id} title="Delete">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div class="py-12 flex flex-col items-center justify-center text-center px-4 border-2 border-dashed border-white/5 rounded-3xl">
+                <div class="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-white/10 mb-4">
+                  <Plus size={24} />
+                </div>
+                <h4 class="text-sm font-bold text-white mb-1">No Courts Yet</h4>
+                <p class="text-[10px] text-white/20 max-w-[150px]">Click 'Add New Court' above to start setting up your facility.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Blackout Manager -->
+        <button id="open-blackout-modal" class="w-full bento-card border-white/10 bg-white/5 p-6 flex flex-col items-center justify-center gap-2 hover:bg-white/10 transition-all cursor-pointer group text-center">
+           <div class="text-brand-primary group-hover:rotate-12 transition-transform mb-2">
+              <AlertTriangle size={32} />
+           </div>
+           <h3 class="text-sm font-bold uppercase tracking-widest text-white">Blackout Manager</h3>
+           <p class="text-[10px] text-white/40 max-w-[200px]">Block specific dates for maintenance, holidays, or private events.</p>
+        </button>
+      </div>
+    </div>
+
+    <!-- Blackout Modal -->
+    <div id="blackout-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+      <div class="bg-brand-dark border border-white/10 p-8 rounded-3xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div class="flex items-center justify-between mb-8">
+          <div>
+            <h2 class="text-2xl font-bold">Blackout Dates</h2>
+            <p class="text-white/40 text-xs mt-1">Prevent any bookings on specific days.</p>
+          </div>
+          <button id="close-blackout-modal" class="p-2 hover:bg-white/5 rounded-full text-white/40 transition-colors">
+            <Plus size={24} class="rotate-45" />
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div class="space-y-6">
+            <h3 class="text-xs font-bold uppercase tracking-widest text-brand-primary">Add New Blackout</h3>
+            <form id="blackout-form" class="space-y-4">
+              <div class="space-y-2">
+                <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Select Court</label>
+                <div class="relative">
+                  <select name="court_id" required class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white text-sm appearance-none cursor-pointer hover:bg-white/10">
+                    {courts?.map(c => <option value={c.id} class="bg-brand-dark text-white">{c.name}</option>)}
+                  </select>
+                  <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-white/20">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </div>
+                </div>
+              </div>
+              <div class="space-y-2">
+                <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Date</label>
+                <input type="date" name="date" required class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white text-sm" />
+              </div>
+              <div class="space-y-2">
+                <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Reason (Optional)</label>
+                <input type="text" name="reason" placeholder="Holiday, Repair, etc." class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white text-sm" />
+              </div>
+              <button type="submit" class="w-full py-3 bg-brand-primary text-black rounded-xl font-bold hover:bg-brand-primary/90 transition-all">Add Blackout</button>
+            </form>
+          </div>
+
+          <div class="space-y-6">
+            <h3 class="text-xs font-bold uppercase tracking-widest text-white/40">Active Blackouts</h3>
+            <div class="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              {blackoutsData?.map(b => (
+                <div class="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between group">
+                  <div>
+                    <p class="text-xs font-bold text-white">{format(new Date(b.date), 'MMM d, yyyy')}</p>
+                    <p class="text-[10px] text-white/40 truncate max-w-[150px]">{b.courts.name} • {b.reason || 'No reason'}</p>
+                  </div>
+                  <button class="delete-blackout-btn p-2 text-white/20 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" data-id={b.id}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {(!blackoutsData || blackoutsData.length === 0) && <p class="text-[10px] text-white/20 italic text-center py-8">No blackout dates set.</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Details Modal -->
+    <div id="details-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+      <div class="bg-brand-dark border border-white/10 p-8 rounded-3xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div class="flex items-center justify-between mb-8">
+           <h2 id="details-title" class="text-2xl font-bold">Court Details</h2>
+           <button id="close-details" class="p-2 hover:bg-white/5 rounded-full text-white/40 transition-colors">
+             <Plus size={24} class="rotate-45" />
+           </button>
+        </div>
+        
+        <div class="space-y-6">
+           <div class="p-6 bg-white/5 rounded-2xl border border-white/5 space-y-4">
+              <div>
+                 <p class="text-[10px] text-white/20 uppercase font-bold tracking-widest mb-1">Base Prices</p>
+                 <div class="flex gap-4">
+                    <div class="flex-1">
+                       <p class="text-xs text-white/40">Exclusive</p>
+                       <p id="details-price" class="text-xl font-bold text-brand-primary"></p>
+                    </div>
+                    <div class="flex-1">
+                       <p class="text-xs text-white/40">Open Play</p>
+                       <p id="details-open-price" class="text-xl font-bold text-brand-primary"></p>
+                    </div>
+                 </div>
+              </div>
+              
+              <div id="details-mode-status" class="pt-2 border-t border-white/5">
+                 <p class="text-[10px] text-white/20 uppercase font-bold tracking-widest mb-1">Status</p>
+                 <div id="details-open-play-status"></div>
+              </div>
+           </div>
+
+           <div id="details-rules-section" class="space-y-3 hidden">
+              <p class="text-[10px] text-white/20 uppercase font-bold tracking-widest">Peak Time Rules</p>
+              <div id="details-rules-list" class="space-y-2"></div>
+           </div>
+
+           <div id="details-slots-section" class="space-y-3 hidden">
+              <p class="text-[10px] text-white/20 uppercase font-bold tracking-widest">Manual Time Slots</p>
+              <div id="details-slots-list" class="flex flex-wrap gap-2"></div>
+           </div>
+        </div>
+
+        <div class="mt-8">
+           <button id="details-edit-trigger" class="w-full py-3 bg-white/5 border border-white/10 rounded-xl font-bold hover:bg-white/10 transition-all text-sm text-white">Edit Court Configuration</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup Modal -->
+    <div id="setup-modal" style="--brand-primary: #00FF94; --color-brand-primary: #00FF94;" class={`fixed inset-0 bg-black/95 backdrop-blur-xl z-[200] flex items-center justify-center ${isSetupCompleted ? 'hidden' : ''} p-4`}>
+       <div class="bg-brand-dark border border-white/10 p-10 rounded-[40px] w-full max-w-xl shadow-2xl animate-in fade-in zoom-in-95 duration-500">
+          <div class="text-center mb-10">
+             <div class="w-20 h-20 bg-brand-primary/10 rounded-3xl flex items-center justify-center text-brand-primary mx-auto mb-6">
+                <Settings size={40} />
+             </div>
+             <h2 class="text-3xl font-black text-white mb-2">Welcome, Partner!</h2>
+             <p class="text-white/40">Let's personalize your facility dashboard in just a few steps.</p>
+          </div>
+
+          <form id="setup-form" class="space-y-8">
+             <input type="hidden" name="manager_id" value={session.user.id} />
+             <div class="space-y-4">
+                <div class="space-y-2">
+                   <label class="text-xs font-bold uppercase tracking-widest text-white/40 pl-1">Facility Name</label>
+                   <input type="text" name="business_name" required placeholder="Ex: Pickle Central Manila" class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none focus:border-brand-primary transition-all shadow-inner" />
+                </div>
+                
+                <div class="space-y-2">
+                   <label class="text-xs font-bold uppercase tracking-widest text-white/40 pl-1">Facility Logo</label>
+                   <div class="relative group">
+                      <input type="file" name="logo_file" accept="image/*" class="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none focus:border-brand-primary transition-all shadow-inner file:mr-4 file:py-1 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-brand-primary/10 file:text-brand-primary hover:file:bg-brand-primary/20" />
+                   </div>
+                   <p class="text-[10px] text-white/20 pl-1">Supported formats: PNG, JPG, SVG. Recommended size: 512x512px.</p>
+                </div>
+
+                <div class="space-y-3">
+                   <label class="text-xs font-bold uppercase tracking-widest text-white/40 pl-1">Brand Color Palette</label>
+                   <div class="grid grid-cols-5 gap-3" id="color-palette">
+                      {[
+                        { name: 'Pickle', hex: '#00FF94' },
+                        { name: 'Sky', hex: '#00E0FF' },
+                        { name: 'Power', hex: '#FF00E5' },
+                        { name: 'Gold', hex: '#FFD600' },
+                        { name: 'Clean', hex: '#FFFFFF' }
+                      ].map((color, i) => (
+                         <label class="relative group cursor-pointer">
+                            <input type="radio" name="primary_color" value={color.hex} class="peer sr-only" checked={i === 0} />
+                            <div class="h-14 rounded-2xl border-2 border-transparent peer-checked:border-white transition-all group-hover:scale-105 shadow-lg" style={`background-color: ${color.hex}`}></div>
+                            <div class="absolute -bottom-5 left-0 right-0 text-[8px] text-center font-bold text-white/20 uppercase opacity-0 group-hover:opacity-100 transition-opacity">{color.name}</div>
+                         </label>
+                      ))}
+                   </div>
+                </div>
+             </div>
+
+             <button type="submit" class="w-full py-5 bg-brand-primary text-black font-black rounded-2xl hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-brand-primary/20 text-lg mt-4">Save & Continue</button>
+          </form>
+       </div>
+    </div>
+
+    <!-- User Guide Modal -->
+    <div id="guide-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[200] flex items-center justify-center hidden p-4">
+       <div class="bg-brand-dark border border-white/10 p-10 rounded-[40px] w-full max-w-2xl shadow-2xl">
+          <h2 class="text-3xl font-black text-white mb-8 flex items-center gap-3">
+             <div class="w-10 h-10 bg-brand-primary/10 rounded-xl flex items-center justify-center text-brand-primary">
+                <Activity size={20} />
+             </div>
+             Quick Start Guide
+          </h2>
+          
+          <div class="grid grid-cols-2 gap-6 mb-10">
+             <div class="p-6 bg-white/5 rounded-3xl border border-white/5 space-y-3">
+                <div class="w-8 h-8 bg-brand-primary text-black rounded-lg flex items-center justify-center font-bold">1</div>
+                <h4 class="font-bold text-white">Setup Your Courts</h4>
+                <p class="text-xs text-white/40 leading-relaxed">Add your physical courts, set their hourly rates, and enable "Open Play" for shared games.</p>
+             </div>
+             <div class="p-6 bg-white/5 rounded-3xl border border-white/5 space-y-3">
+                <div class="w-8 h-8 bg-brand-primary text-black rounded-lg flex items-center justify-center font-bold">2</div>
+                <h4 class="font-bold text-white">Share Your Link</h4>
+                <p class="text-xs text-white/40 leading-relaxed">Each court has a unique link. Copy it and share with your players for instant booking.</p>
+             </div>
+             <div class="p-6 bg-white/5 rounded-3xl border border-white/5 space-y-3">
+                <div class="w-8 h-8 bg-brand-primary text-black rounded-lg flex items-center justify-center font-bold">3</div>
+                <h4 class="font-bold text-white">Manage Bookings</h4>
+                <p class="text-xs text-white/40 leading-relaxed">View all upcoming reservations in the calendar. Switch to "Reservations" tab for player details.</p>
+             </div>
+             <div class="p-6 bg-white/5 rounded-3xl border border-white/5 space-y-3">
+                <div class="w-8 h-8 bg-brand-primary text-black rounded-lg flex items-center justify-center font-bold">4</div>
+                <h4 class="font-bold text-white">Blackout Dates</h4>
+                <p class="text-xs text-white/40 leading-relaxed">Need to close for maintenance? Use the Blackout Manager to block specific dates instantly.</p>
+             </div>
+          </div>
+
+          <button id="close-guide" class="w-full py-5 bg-white text-black font-black rounded-2xl hover:scale-[1.02] active:scale-95 transition-all shadow-xl text-lg">Got it, Let's Go!</button>
+       </div>
+    </div>
+    <div id="confirm-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center hidden p-4">
+      <div class="bg-brand-dark border border-white/10 p-8 rounded-3xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+        <div class="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-500 mb-6 mx-auto">
+          <AlertTriangle size={24} />
+        </div>
+        <h3 id="confirm-title" class="text-xl font-bold text-white text-center mb-2">Are you sure?</h3>
+        <p id="confirm-message" class="text-sm text-white/40 text-center mb-8 leading-relaxed">This action cannot be undone and will permanently remove this data.</p>
+        <div class="flex gap-3">
+          <button id="confirm-cancel" class="flex-1 py-3 bg-white/5 border border-white/10 rounded-xl font-bold hover:bg-white/10 transition-all text-sm text-white">Cancel</button>
+          <button id="confirm-proceed" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-all text-sm shadow-lg shadow-red-500/20">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-8 right-8 z-[100] flex flex-col gap-3 pointer-events-none"></div>
+
+    <template id="toast-template">
+      <div class="toast-item pointer-events-auto bg-brand-dark/80 backdrop-blur-md border border-white/10 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 duration-300">
+        <div class="toast-icon w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"></div>
+        <div class="toast-content">
+          <p class="toast-title text-sm font-bold text-white"></p>
+          <p class="toast-message text-[10px] text-white/40"></p>
+        </div>
+      </div>
+    </template>
+    <div id="court-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+      <div class="bg-brand-dark border border-white/10 p-8 rounded-3xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <h2 id="modal-title" class="text-2xl font-bold mb-8">Add New Court</h2>
+        <form id="court-form" class="space-y-6">
+          <input type="hidden" name="id" id="court-id" />
+          <input type="hidden" name="manager_id" value={session.user.id} />
+          
+          <div class="space-y-2">
+            <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Court Name</label>
+            <input required type="text" name="name" id="modal-name" placeholder="Court A" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Default Exclusive</label>
+              <input required type="number" name="base_price" id="modal-price" placeholder="1000" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Default Open</label>
+              <input type="number" name="base_open_price" id="modal-open-price" placeholder="50" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-brand-primary transition-all text-white" />
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold uppercase tracking-widest text-white/40">Pricing Rules (Peak Times)</label>
+              <button type="button" id="add-rule-row" class="text-brand-primary hover:text-brand-primary/80 transition-colors p-1">
+                <Plus size={20} />
+              </button>
+            </div>
+            <div id="rules-container" class="space-y-3"></div>
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold uppercase tracking-widest text-white/40">Manual Time Slots</label>
+              <button type="button" id="add-slot-row" class="text-brand-primary hover:text-brand-primary/80 transition-colors p-1">
+                <Plus size={20} />
+              </button>
+            </div>
+            <div id="slots-container" class="space-y-3 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar"></div>
+            <p class="text-[10px] text-white/20">Define specific blocks (e.g., 6:00 AM - 7:30 AM). If empty, standard hours apply.</p>
+          </div>
+
+          <div class="p-4 bg-white/5 rounded-2xl border border-white/5 space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-xs font-bold text-white">Enable Open Play</p>
+                <p class="text-[10px] text-white/40">Allows users to join shared games</p>
+              </div>
+              <input type="checkbox" name="allow_open_play" id="modal-open-play" class="w-4 h-4 rounded bg-white/10 border-white/20 text-brand-primary focus:ring-brand-primary" />
+            </div>
+            <div id="max-players-container" class="space-y-2 hidden border-t border-white/5 pt-3">
+               <label class="text-[10px] font-bold uppercase tracking-widest text-white/40">Max Players per Open Slot</label>
+               <input type="number" name="max_players" id="modal-max-players" value="4" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white" />
+            </div>
+          </div>
+
+          <div class="flex gap-4 pt-4">
+            <button type="button" id="close-modal" class="flex-1 py-3 border border-white/10 rounded-xl font-bold hover:bg-white/5 transition-all text-sm text-white">Cancel</button>
+            <button type="submit" id="submit-btn" class="flex-1 py-3 bg-brand-primary text-black rounded-xl font-bold hover:bg-brand-primary/90 transition-all text-sm">Save Court</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <template id="slot-row-template">
+      <div class="flex items-center gap-2 group animate-in fade-in slide-in-from-top-1">
+        <div class="grid grid-cols-2 gap-2 flex-1">
+          <input type="time" class="start-time w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-primary transition-all text-white" />
+          <input type="time" class="end-time w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand-primary transition-all text-white" />
+        </div>
+        <button type="button" class="remove-slot p-2 text-white/20 hover:text-red-500 transition-colors">
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </template>
+
+    <template id="rule-row-template">
+      <div class="flex items-center gap-2 group animate-in fade-in slide-in-from-top-1">
+        <div class="grid grid-cols-3 gap-1.5 flex-1">
+          <input type="time" class="rule-start w-full bg-white/5 border border-white/10 rounded-xl px-2 py-1.5 text-[10px] focus:outline-none focus:border-brand-primary transition-all text-white" />
+          <input type="time" class="rule-end w-full bg-white/5 border border-white/10 rounded-xl px-2 py-1.5 text-[10px] focus:outline-none focus:border-brand-primary transition-all text-white" />
+          <input type="number" placeholder="Excl ₱" class="rule-price w-full bg-white/5 border border-white/10 rounded-xl px-2 py-1.5 text-[10px] focus:outline-none focus:border-brand-primary transition-all text-white" />
+        </div>
+        <button type="button" class="remove-rule p-1.5 text-white/20 hover:text-red-500 transition-colors">
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </template>
+  </div>
+</Layout>
+
+<script>
+  import { supabase } from '../lib/supabase';
+
+  const modal = document.getElementById('court-modal');
+  const openAddBtn = document.getElementById('open-add-modal');
+  const closeBtn = document.getElementById('close-modal');
+  const form = document.getElementById('court-form') as HTMLFormElement;
+  const modalTitle = document.getElementById('modal-title');
+  const submitBtn = document.getElementById('submit-btn');
+  
+  const idInput = document.getElementById('court-id') as HTMLInputElement;
+  const nameInput = document.getElementById('modal-name') as HTMLInputElement;
+  const priceInput = document.getElementById('modal-price') as HTMLInputElement;
+  const rulesContainer = document.getElementById('rules-container');
+  const ruleTemplate = document.getElementById('rule-row-template') as HTMLTemplateElement;
+  const addRuleBtn = document.getElementById('add-rule-row');
+  
+  const slotsContainer = document.getElementById('slots-container');
+  const slotTemplate = document.getElementById('slot-row-template') as HTMLTemplateElement;
+  const addSlotBtn = document.getElementById('add-slot-row');
+
+  function addSlotRow(start = '', end = '') {
+    const clone = slotTemplate.content.cloneNode(true) as HTMLElement;
+    const startInput = clone.querySelector('.start-time') as HTMLInputElement;
+    const endInput = clone.querySelector('.end-time') as HTMLInputElement;
+    const removeBtn = clone.querySelector('.remove-slot');
+    
+    if (start) startInput.value = start;
+    if (end) endInput.value = end;
+    
+    removeBtn?.addEventListener('click', (e) => {
+      (e.target as HTMLElement).closest('.group')?.remove();
+    });
+    
+    slotsContainer?.appendChild(clone);
+  }
+
+  addSlotBtn?.addEventListener('click', () => addSlotRow());
+
+  function addRuleRow(start = '', end = '', price = '') {
+    const clone = ruleTemplate.content.cloneNode(true) as HTMLElement;
+    const startInput = clone.querySelector('.rule-start') as HTMLInputElement;
+    const endInput = clone.querySelector('.rule-end') as HTMLInputElement;
+    const priceInput = clone.querySelector('.rule-price') as HTMLInputElement;
+    const removeBtn = clone.querySelector('.remove-rule');
+    
+    if (start) startInput.value = start;
+    if (end) endInput.value = end;
+    if (price) priceInput.value = price;
+    
+    removeBtn?.addEventListener('click', (e) => {
+      (e.target as HTMLElement).closest('.group')?.remove();
+    });
+    
+    rulesContainer?.appendChild(clone);
+  }
+
+  addRuleBtn?.addEventListener('click', () => addRuleRow());
+
+  openAddBtn?.addEventListener('click', () => {
+    modalTitle!.innerText = 'Add New Court';
+    form.reset();
+    idInput.value = '';
+    rulesContainer!.innerHTML = '';
+    slotsContainer!.innerHTML = '';
+    modal?.classList.remove('hidden');
+  });
+
+  closeBtn?.addEventListener('click', () => modal?.classList.add('hidden'));
+
+  // Toggle Max Players
+  document.getElementById('modal-open-play')?.addEventListener('change', (e) => {
+    const container = document.getElementById('max-players-container');
+    if ((e.target as HTMLInputElement).checked) container?.classList.remove('hidden');
+    else container?.classList.add('hidden');
+  });
+
+  // Setup Logic
+  const setupModal = document.getElementById('setup-modal');
+  const setupForm = document.getElementById('setup-form') as HTMLFormElement;
+  const guideModal = document.getElementById('guide-modal');
+  const closeGuideBtn = document.getElementById('close-guide');
+  const colorPalette = document.getElementById('color-palette');
+
+  // Live Color Preview
+  colorPalette?.addEventListener('change', (e) => {
+    const target = e.target as HTMLInputElement;
+    if (target.name === 'primary_color') {
+      setupModal?.style.setProperty('--brand-primary', target.value);
+      setupModal?.style.setProperty('--color-brand-primary', target.value);
+    }
+  });
+
+  setupForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = setupForm.querySelector('button[type="submit"]') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Saving...';
+
+    const formData = new FormData(setupForm);
+    const rawData = Object.fromEntries(formData.entries());
+    const logoFile = formData.get('logo_file') as File;
+    let logoUrl = '';
+
+    try {
+      // 1. Upload Logo if present
+      if (logoFile && logoFile.size > 0) {
+        const fileExt = logoFile.name.split('.').pop();
+        const fileName = `${rawData.manager_id}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+          .from('logos')
+          .upload(fileName, logoFile, { upsert: true });
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('logos')
+          .getPublicUrl(fileName);
+          
+        logoUrl = publicUrl;
+      }
+
+      // 2. Save Settings
+      const settingsData = {
+        manager_id: rawData.manager_id,
+        business_name: rawData.business_name,
+        primary_color: rawData.primary_color,
+        logo_url: logoUrl,
+        is_setup_completed: true
+      };
+
+      const { error } = await supabase.from('facility_settings').upsert([settingsData]);
+      if (error) throw error;
+      
+      showToast('Success!', 'Your branding has been saved.');
+      setupModal?.classList.add('hidden');
+      guideModal?.classList.remove('hidden');
+    } catch (err: any) {
+      console.error('Setup Error:', err);
+      showToast('Error', err.message, 'error');
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Save & Continue';
+    }
+  });
+
+  closeGuideBtn?.addEventListener('click', () => {
+    guideModal?.classList.add('hidden');
+    window.location.reload();
+  });
+
+  // Toast & Confirm System
+  const toastContainer = document.getElementById('toast-container');
+  const toastTemplate = document.getElementById('toast-template') as HTMLTemplateElement;
+  const confirmModal = document.getElementById('confirm-modal');
+  const confirmProceed = document.getElementById('confirm-proceed');
+  const confirmCancel = document.getElementById('confirm-cancel');
+
+  function showToast(title: string, message: string, type: 'success' | 'error' = 'success') {
+    const clone = toastTemplate.content.cloneNode(true) as HTMLElement;
+    const item = clone.querySelector('.toast-item') as HTMLElement;
+    const icon = clone.querySelector('.toast-icon') as HTMLElement;
+    
+    item.classList.add(type === 'success' ? 'border-brand-primary/20' : 'border-red-500/20');
+    icon.classList.add(type === 'success' ? 'bg-brand-primary/10' : 'bg-red-500/10');
+    icon.classList.add(type === 'success' ? 'text-brand-primary' : 'text-red-500');
+    icon.innerHTML = type === 'success' ? '✓' : '!';
+    
+    clone.querySelector('.toast-title')!.textContent = title;
+    clone.querySelector('.toast-message')!.textContent = message;
+    
+    toastContainer?.appendChild(clone);
+    const toastEl = toastContainer?.lastElementChild;
+    
+    setTimeout(() => {
+      toastEl?.classList.add('animate-out', 'fade-out', 'slide-out-to-right-10');
+      setTimeout(() => toastEl?.remove(), 300);
+    }, 4000);
+  }
+
+  function showConfirm(title: string, message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      document.getElementById('confirm-title')!.innerText = title;
+      document.getElementById('confirm-message')!.innerText = message;
+      confirmModal?.classList.remove('hidden');
+
+      const onProceed = () => {
+        confirmModal?.classList.add('hidden');
+        cleanup();
+        resolve(true);
+      };
+      const onCancel = () => {
+        confirmModal?.classList.add('hidden');
+        cleanup();
+        resolve(false);
+      };
+      const cleanup = () => {
+        confirmProceed?.removeEventListener('click', onProceed);
+        confirmCancel?.removeEventListener('click', onCancel);
+      };
+
+      confirmProceed?.addEventListener('click', onProceed);
+      confirmCancel?.addEventListener('click', onCancel);
+    });
+  }
+
+  // Details Modal Logic
+  const detailsModal = document.getElementById('details-modal');
+  const closeDetailsBtn = document.getElementById('close-details');
+  let lastDetailsBtn: HTMLElement | null = null;
+
+  function showDetails(btn: HTMLElement) {
+    lastDetailsBtn = btn;
+    const name = btn.getAttribute('data-name');
+    const price = btn.getAttribute('data-price');
+    const openPrice = btn.getAttribute('data-open-price');
+    const isOpenPlay = btn.getAttribute('data-open-play') === 'true';
+    const maxPlayers = btn.getAttribute('data-max-players');
+    const rules = JSON.parse(btn.getAttribute('data-rules') || '[]');
+    const slots = JSON.parse(btn.getAttribute('data-slots') || '[]');
+
+    document.getElementById('details-title')!.innerText = name || 'Court Details';
+    document.getElementById('details-price')!.innerText = `₱${price}`;
+    document.getElementById('details-open-price')!.innerText = `₱${openPrice}`;
+    
+    const statusContainer = document.getElementById('details-open-play-status')!;
+    statusContainer.innerHTML = isOpenPlay 
+      ? `<span class="text-[9px] bg-brand-primary/10 text-brand-primary px-2 py-1 rounded-lg font-bold">Open Play Enabled (${maxPlayers} players max)</span>`
+      : `<span class="text-[9px] bg-white/5 text-white/20 px-2 py-1 rounded-lg font-bold">Exclusive Only</span>`;
+
+    // Rules
+    const rulesSection = document.getElementById('details-rules-section')!;
+    const rulesList = document.getElementById('details-rules-list')!;
+    if (rules.length > 0) {
+      rulesSection.classList.remove('hidden');
+      rulesList.innerHTML = rules.map((r: any) => `
+        <div class="flex items-center justify-between p-2 bg-white/5 rounded-lg border border-white/5 text-[10px]">
+          <span class="text-white/60 font-bold">${r.start} - ${r.end}</span>
+          <span class="text-brand-primary font-bold">₱${r.price}</span>
+        </div>
+      `).join('');
+    } else {
+      rulesSection.classList.add('hidden');
+    }
+
+    // Slots
+    const slotsSection = document.getElementById('details-slots-section')!;
+    const slotsList = document.getElementById('details-slots-list')!;
+    if (slots.length > 0) {
+      slotsSection.classList.remove('hidden');
+      slotsList.innerHTML = slots.map((s: any) => `
+        <span class="px-2 py-1 bg-white/5 rounded-md border border-white/5 text-[9px] text-white/40 font-bold">${s.start} - ${s.end}</span>
+      `).join('');
+    } else {
+      slotsSection.classList.add('hidden');
+    }
+
+    detailsModal?.classList.remove('hidden');
+  }
+
+  document.querySelectorAll('.view-court-btn').forEach(card => {
+    card.addEventListener('click', () => showDetails(card as HTMLElement));
+  });
+
+  closeDetailsBtn?.addEventListener('click', () => detailsModal?.classList.add('hidden'));
+  
+  document.getElementById('details-edit-trigger')?.addEventListener('click', () => {
+    detailsModal?.classList.add('hidden');
+    if (lastDetailsBtn) {
+      // Trigger the edit modal logic using the same data
+      const editBtn = lastDetailsBtn.querySelector('.edit-court-btn') as HTMLElement;
+      if (editBtn) editBtn.click();
+    }
+  });
+
+  // Edit Logic
+  document.querySelectorAll('.edit-court-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      modalTitle!.innerText = 'Edit Court';
+      const data = {
+        id: btn.getAttribute('data-id'),
+        name: btn.getAttribute('data-name'),
+        base_price: btn.getAttribute('data-price'),
+        base_open_price: btn.getAttribute('data-open-price'),
+        allow_open_play: btn.getAttribute('data-open-play') === 'true',
+        max_players: btn.getAttribute('data-max-players'),
+        pricing_rules: JSON.parse(btn.getAttribute('data-rules') || '[]'),
+      };
+
+      idInput.value = data.id || '';
+      nameInput.value = data.name || '';
+      priceInput.value = data.base_price || '';
+      (document.getElementById('modal-open-price') as HTMLInputElement).value = data.base_open_price || '';
+      (document.getElementById('modal-open-play') as HTMLInputElement).checked = data.allow_open_play;
+      (document.getElementById('modal-max-players') as HTMLInputElement).value = data.max_players || '4';
+      
+      if (data.allow_open_play) document.getElementById('max-players-container')?.classList.remove('hidden');
+      
+      rulesContainer!.innerHTML = '';
+      data.pricing_rules.forEach((r: any) => addRuleRow(r.start, r.end, r.price));
+
+      slotsContainer!.innerHTML = '';
+      if (btn.getAttribute('data-slots')) {
+        const slots = JSON.parse(btn.getAttribute('data-slots') || '[]');
+        slots.forEach((s: any) => addSlotRow(s.start, s.end));
+      }
+      
+      modal?.classList.remove('hidden');
+    });
+  });
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = idInput.value;
+    const saveBtn = submitBtn as HTMLButtonElement;
+    const originalText = saveBtn.innerText;
+    
+    saveBtn.disabled = true;
+    saveBtn.innerText = 'Saving...';
+
+    const formData = new FormData(form);
+    const rawData = Object.fromEntries(formData.entries());
+    
+    const ruleRows = rulesContainer?.querySelectorAll('.group');
+    const pricingRules: any[] = [];
+    ruleRows?.forEach(row => {
+      const start = (row.querySelector('.rule-start') as HTMLInputElement).value;
+      const end = (row.querySelector('.rule-end') as HTMLInputElement).value;
+      const price = (row.querySelector('.rule-price') as HTMLInputElement).value;
+      if (start && end && price) pricingRules.push({ start, end, price: parseFloat(price) });
+    });
+
+    const slotRows = slotsContainer?.querySelectorAll('.group');
+    const manualSlots: any[] = [];
+    slotRows?.forEach(row => {
+      const start = (row.querySelector('.start-time') as HTMLInputElement).value;
+      const end = (row.querySelector('.end-time') as HTMLInputElement).value;
+      if (start && end) manualSlots.push({ start, end });
+    });
+
+    const data = {
+      manager_id: rawData.manager_id,
+      name: rawData.name,
+      base_price: parseFloat(rawData.base_price as string) || 0,
+      base_open_price: parseFloat(rawData.base_open_price as string) || 0,
+      allow_open_play: formData.get('allow_open_play') === 'on',
+      max_players: parseInt(rawData.max_players as string) || 4,
+      pricing_rules: pricingRules,
+      manual_slots: manualSlots
+    };
+
+    try {
+      let result;
+      if (id) {
+        result = await supabase.from('courts').update(data).eq('id', id);
+      } else {
+        result = await supabase.from('courts').insert([data]);
+      }
+
+      if (result.error) throw result.error;
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Save Error:', err);
+      alert('Failed to save court: ' + err.message);
+      saveBtn.disabled = false;
+      saveBtn.innerText = originalText;
+    }
+  });
+
+  // Toggle Calendar/Reservations
+  const btnCalendar = document.getElementById('view-calendar');
+  const btnReservations = document.getElementById('view-reservations');
+  const calendarContainer = document.getElementById('calendar-container');
+  const reservationsContainer = document.getElementById('reservations-container');
+
+  btnCalendar?.addEventListener('click', () => {
+    btnCalendar.classList.add('bg-brand-primary', 'text-black');
+    btnCalendar.classList.remove('text-white/40');
+    btnReservations?.classList.remove('bg-brand-primary', 'text-black');
+    btnReservations?.classList.add('text-white/40');
+    calendarContainer?.classList.remove('hidden');
+    reservationsContainer?.classList.add('hidden');
+  });
+
+  btnReservations?.addEventListener('click', () => {
+    btnReservations.classList.add('bg-brand-primary', 'text-black');
+    btnReservations.classList.remove('text-white/40');
+    btnCalendar?.classList.remove('bg-brand-primary', 'text-black');
+    btnCalendar?.classList.add('text-white/40');
+    reservationsContainer?.classList.remove('hidden');
+    calendarContainer?.classList.add('hidden');
+  });
+
+  // View Toggle (Month/Week)
+  const btnMonth = document.getElementById('view-month');
+  const btnWeek = document.getElementById('view-week');
+  const monthView = document.getElementById('month-view-container');
+  const weekView = document.getElementById('week-view-container');
+
+  btnMonth?.addEventListener('click', () => {
+    btnMonth.classList.add('bg-white/10', 'text-white');
+    btnMonth.classList.remove('text-white/40');
+    btnWeek?.classList.remove('bg-white/10', 'text-white');
+    btnWeek?.classList.add('text-white/40');
+    monthView?.classList.remove('hidden');
+    weekView?.classList.add('hidden');
+  });
+
+  btnWeek?.addEventListener('click', () => {
+    btnWeek.classList.add('bg-white/10', 'text-white');
+    btnWeek.classList.remove('text-white/40');
+    btnMonth?.classList.remove('bg-white/10', 'text-white');
+    btnMonth?.classList.add('text-white/40');
+    weekView?.classList.remove('hidden');
+    monthView?.classList.add('hidden');
+  });
+
+  // Delete Reservation
+  document.querySelectorAll('.delete-booking-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const confirmed = await showConfirm('Delete Reservation?', 'Are you sure you want to cancel this booking? This cannot be undone.');
+      if (!confirmed) return;
+      
+      const id = btn.getAttribute('data-id');
+      const { error } = await supabase.from('bookings').delete().eq('id', id);
+      if (error) showToast('Error', error.message, 'error');
+      else {
+        showToast('Deleted', 'Reservation has been removed.');
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    });
+  });
+
+  // Copy Link
+  document.querySelectorAll('.copy-link-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const url = `${window.location.origin}/book/${id}`;
+      navigator.clipboard.writeText(url);
+      showToast('Copied!', 'Booking link copied to clipboard.');
+    });
+  });
+
+  // Delete Court
+  document.querySelectorAll('.delete-court-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const confirmed = await showConfirm('Delete Court?', 'Are you sure you want to delete this court and all its data?');
+      if (!confirmed) return;
+      
+      const id = btn.getAttribute('data-id');
+      const { error } = await supabase.from('courts').delete().eq('id', id);
+      if (error) showToast('Error', error.message, 'error');
+      else {
+        showToast('Success', 'Court deleted successfully.');
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    });
+  });
+
+  // Logout
+  document.getElementById('logout-btn')?.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    window.location.href = '/login';
+  });
+
+  // Blackout Logic
+  const blackoutModal = document.getElementById('blackout-modal');
+  document.getElementById('open-blackout-modal')?.addEventListener('click', () => blackoutModal?.classList.remove('hidden'));
+  document.getElementById('close-blackout-modal')?.addEventListener('click', () => blackoutModal?.classList.add('hidden'));
+
+  document.getElementById('blackout-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target as HTMLFormElement);
+    const data = Object.fromEntries(formData.entries());
+    const { error } = await supabase.from('blackouts').insert([data]);
+    if (error) showToast('Error', error.message, 'error');
+    else {
+      showToast('Success', 'Blackout date added.');
+      setTimeout(() => window.location.reload(), 1000);
+    }
+  });
+
+  document.querySelectorAll('.delete-blackout-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      const { error } = await supabase.from('blackouts').delete().eq('id', id);
+      if (error) showToast('Error', error.message, 'error');
+      else {
+        showToast('Success', 'Blackout removed.');
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    });
+  });
+</script>

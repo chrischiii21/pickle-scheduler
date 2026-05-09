@@ -12,10 +12,14 @@
     "astro": "astro"
   },
   "dependencies": {
+    "@astrojs/node": "^10.1.0",
+    "@astrojs/vercel": "^10.0.6",
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/vite": "^4.3.0",
     "astro": "^6.3.1",
     "date-fns": "^4.1.0",
+    "html2canvas": "^1.4.1",
     "lucide-astro": "^0.556.0",
     "tailwindcss": "^4.3.0"
   }

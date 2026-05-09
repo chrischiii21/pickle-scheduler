@@ -1,11 +1,25 @@
 ---
 import '../styles/global.css';
+import { createSupabaseServer } from '../lib/supabase';
 
 interface Props {
 	title: string;
 }
 
 const { title } = Astro.props;
+const supabase = createSupabaseServer(Astro);
+
+const { data: { session } } = await supabase.auth.getSession();
+let primaryColor = '#00FF94';
+let secondaryColor = '#00FF94cc';
+
+if (session) {
+  const { data: settings } = await supabase.from('facility_settings').select('primary_color').eq('manager_id', session.user.id).single();
+  if (settings?.primary_color) {
+    primaryColor = settings.primary_color;
+    secondaryColor = primaryColor + 'cc';
+  }
+}
 ---
 
 <!doctype html>
@@ -20,6 +34,12 @@ const { title } = Astro.props;
 		<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 		<meta name="generator" content={Astro.generator} />
 		<title>{title}</title>
+    <style is:global define:vars={{ primaryColor, secondaryColor }}>
+      :root, html, body {
+        --color-brand-primary: var(--primaryColor) !important;
+        --color-brand-secondary: var(--secondaryColor) !important;
+      }
+    </style>
 	</head>
 	<body>
 		<main class="max-w-7xl mx-auto px-4 py-12">
